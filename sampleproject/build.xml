@@ -17,13 +17,13 @@
         <echo message="Sleeping for a while so you can see the build in the new dashboard" />
         <sleep seconds="30" />
     </target>
-
+Narenmdra
     <target name="test" depends="compile">
         <mkdir dir="target/test-classes"/>
         <javac srcdir="test" destdir="target/test-classes">
             <classpath>
                 <pathelement location="target/classes"/>
-                <pathelement location="lib/junit.jar"/>
+                <pathelement ="lib/junit.jar"/>
             </classpath>
         </javac>
 
