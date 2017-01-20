@@ -1,0 +1,600 @@
+import java.io.ByteArrayOutputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.io.PrintWriter;
+import java.text.SimpleDateFormat;
+import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Date;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Map;
+import java.util.Set;
+
+import javax.mail.MessagingException;
+
+import com.documentum.fc.client.DfAuthenticationException;
+import com.documentum.fc.client.DfIdentityException;
+import com.documentum.fc.client.DfPrincipalException;
+import com.documentum.fc.client.DfQuery;
+import com.documentum.fc.client.DfServiceException;
+import com.documentum.fc.client.DfSingleDocbaseModule;
+import com.documentum.fc.client.DfSysObject;
+import com.documentum.fc.client.IDfCollection;
+import com.documentum.fc.client.IDfDocument;
+import com.documentum.fc.client.IDfGroup;
+import com.documentum.fc.client.IDfQuery;
+import com.documentum.fc.client.IDfRelation;
+import com.documentum.fc.client.IDfSession;
+import com.documentum.fc.client.IDfSysObject;
+import com.documentum.fc.client.IDfVirtualDocument;
+import com.documentum.fc.client.IDfVirtualDocumentNode;
+import com.documentum.fc.common.DfException;
+import com.documentum.fc.common.DfId;
+import com.documentum.fc.methodserver.IDfMethod;
+import com.dums.edm.util.dumsEmailNotification;
+import com.dums.edm.util.dumsEncrypt;
+import com.dums.edm.util.dumsSessionManager;
+import com.dums.edm.util.AMRSUtil;
+
+
+
+public class AMRSVirtualDocumentUtility extends DfSingleDocbaseModule implements IDfMethod {
+
+	/* (non-Javadoc)
+	 * @see com.documentum.fc.methodserver.IDfMethod#execute(java.util.Map, java.io.PrintWriter)
+	 * 
+	 * Map Params : {user_name<>, password<>, docbase_name<>, debug_mode<true/false>, job_mode<SpecialDelete/Disposition>}
+	 * 
+	 */
+	public int execute(Map params, PrintWriter printwriter) throws Exception {
+		long startTime = 0;
+		long endTime = 0;
+		//String strStartDate = "";
+		Calendar calNow = Calendar.getInstance();
+		
+		dumsSessionManager sessionMgr = null;
+		IDfDocument doc = null;
+		toList = new ArrayList<String>();
+		ccList = new ArrayList<String>();
+
+		SimpleDateFormat sdf = new SimpleDateFormat("MM-dd-yyyy_HH:mm:ss");
+
+		try {
+			jobReport = new ByteArrayOutputStream();
+			initParams(params);
+			sessionMgr = new dumsSessionManager();
+			if (sessionMgr != null) {
+				dumsSessionManager sessionMgrInst = dumsSessionManager
+				.newSession(userName, password, debugMode);
+				session = sessionMgrInst.getSession();
+				if (session == null) {
+					throw new DfException(
+							"Error creating session - session variable is null");
+				}
+				startTime = System.currentTimeMillis();
+				strStartDate = sdf.format(calNow.getTime());
+				msgPrintJobLog("#####################################################");
+				if(jobMode.equalsIgnoreCase("SpecialDelete"))
+					msgPrintJobLog("#\tJob Name		: AMRSRemoveChildDocsForSpecialDelete");
+				else
+					msgPrintJobLog("#\tJob Name   	: AMRSRemoveChildDocsForDisposition");				
+				msgPrintJobLog("#\tStart Time 	: " + strStartDate);
+				msgPrintJobLog("#\tDebug Mode 	: " + debugMode);
+				msgPrintJobLog("#\tJob Mode 	: " + jobMode);
+				msgPrintJobLog("#####################################################");
+				msgPrintJobLog("");
+				
+				this.processDocuments();
+
+				endTime = System.currentTimeMillis();
+				msgPrintJobLog("#\tTotal Time taken	: "
+						+ (endTime - startTime) + " millisecs");
+				msgPrintJobLog("#####################################################");
+			}
+			if(jobMode.equalsIgnoreCase("SpecialDelete"))
+				doc = AMRSUtil.createOutputDocument("AMRSRemoveChildDocsForSpecialDeleteLog_"
+					+ strStartDate + ".log",
+					"/AMRS/Job Reports/Remove Children",
+					"dm_document", "crtext", session);
+			else
+				doc = AMRSUtil.createOutputDocument("AMRSRemoveChildDocsForDispositionLog_"
+						+ strStartDate + ".log",
+						"/AMRS/Job Reports/Remove Children",
+						"dm_document", "crtext", session);
+			
+			if (doc != null) {
+				doc.setContent((ByteArrayOutputStream) jobReport);
+				doc.save();
+			}
+
+		} catch (DfException de) {
+			this.msgPrintJobLog("Error creating session - in catch -"
+					+ de.getMessage());
+			throw de;
+		} finally {
+			if (session != null) {
+				session.disconnect();
+			}
+			sessionMgr = null;
+			jobReport.close();
+		}
+		return 0;
+	}
+
+	/**
+	 * Main method is used to run the method in stand-alone mode
+	 * 
+	 * @param args
+	 *     List of arguments passed to the program. Expected argument
+	 *     List : Username, Password, Docbase, Debug Mode(true/false)
+	 */
+	public static void main(String[] args) throws DfIdentityException,
+	DfAuthenticationException, DfPrincipalException, DfServiceException {
+
+		FileOutputStream outPut = null;
+		PrintWriter pWriter = null;
+
+		ByteArrayOutputStream outPutStream = new ByteArrayOutputStream();
+		pWriter = new PrintWriter(outPutStream);
+
+		Map paramMap = new HashMap();
+		String[] argKeys = new String[] { USER_NAME, PASSWORD, DOCBASE_NAME,
+				DEBUG_MODE, JOB_MODE};
+
+		for (int idx = 0; idx < args.length; idx++) {
+			String[] arValue = { "" };
+			arValue[0] = args[idx];
+			paramMap.put(argKeys[idx], arValue);
+		}
+
+		AMRSVirtualDocumentUtility AMRSVirtualDocumentUtilityCMDline = new AMRSVirtualDocumentUtility();
+
+		try {
+			AMRSVirtualDocumentUtilityCMDline.execute(paramMap, pWriter);
+		} catch (Exception df) {
+			df.printStackTrace();
+		}
+	}
+
+	/**
+	 * This method is used to print the logging info to a log file.
+	 * 
+	 * @param msg
+	 */
+	public void msgPrintJobLog(String msg) {
+		try {
+			// jobReport.write((msg + EOL_WIN32));
+			jobReport.write((msg + EOL_WIN32).getBytes());
+			jobReport.flush();
+		} catch (IOException e) {
+			e.printStackTrace();
+		} finally {
+			//System.out.println("" + msg);
+		}
+	}
+
+	/**
+	 * This method initializes the parameters passed from the 'AMRSSpecialDelete' Job 
+	 * and report if there is any parameter missing
+	 * 
+	 * @param params
+	 * @throws Exception
+	 */
+	protected void initParams(Map params) throws Exception {
+		Set keys = params.keySet();
+		Iterator iter = keys.iterator();
+		String Logger = BLANK_STRING;
+		boolean missingParams = false;
+		while (iter.hasNext()) {
+			String key = (String) iter.next();
+
+			if ((key == null) || (key.length() == 0)) {
+				continue;
+			}
+
+			String[] value = (String[]) params.get(key);
+			//Logger = Logger + "* Param name = " + key + " :: Value = " + value[0] + EOL_WIN32;
+
+			if (key.equalsIgnoreCase(USER_NAME))
+				userName = (value.length > 0) ? value[0] : BLANK_STRING;
+				else if (key.equalsIgnoreCase(PASSWORD))
+					password = (value.length > 0) ? value[0] : BLANK_STRING;
+					else if (key.equalsIgnoreCase(DOCBASE_NAME)
+							|| key.equalsIgnoreCase("docbase"))
+						docbase = (value.length > 0) ? value[0] : BLANK_STRING;
+						else if (key.equalsIgnoreCase(DEBUG_MODE))
+							debugMode = (value[0].toLowerCase().equals("true")) ? true
+									: false;
+							else if (key.equalsIgnoreCase(JOB_MODE))
+								jobMode = (value[0].toLowerCase().equals("SpecialDelete")) ? value[0] : value[0];
+		}
+
+		// check for req fields
+		missingParams = checkMissingParam(docbase, DOCBASE_NAME, Logger);
+		missingParams = checkMissingParam(userName, USER_NAME, Logger);
+		missingParams = checkMissingParam(password, PASSWORD, Logger);
+		missingParams = checkMissingParam(debugMode + "", DEBUG_MODE, Logger);
+		missingParams = checkMissingParam(jobMode + "", JOB_MODE, Logger);
+
+		if (missingParams) {
+			msgPrintJobLog("Missing params " + Logger);
+			throw new DfException(Logger);
+		} else {
+			msgPrintJobLog(Logger);
+		}
+
+	}
+
+	/**
+	 * This method checks for the missing parameters if any
+	 * 
+	 * @param paramValue
+	 * @param paramName
+	 * @param Logger
+	 * @return
+	 */
+	private boolean checkMissingParam(String paramValue, String paramName,
+			String Logger) {
+		if (paramValue == null || paramValue.equals(BLANK_STRING)) {
+			Logger = Logger + "Missing parameter " + paramName + EOL_WIN32;
+			return true;
+		}
+		return false;
+	}
+
+	/**
+	 * @throws IOException
+	 * @throws DfException
+	 */
+	public void processDocuments() throws IOException, DfException {
+		
+		boolean blnTriggerMail = true;
+		int iVirtualCounter = 0;
+		int iDocsNested = 0;
+		String strDispositionReadyQry1 = "";
+		String strDispositionReadyQry2 = "";
+		String strDispositionCycle = "";		
+		String strRelationObjQry = "";
+		String strComponentChronicleId = "";
+		String strComponentNodeName = "";
+		String strVirtualChronicleId = "";
+		String strVirtualDocLevel1Qry = "";
+		String strVirtualDocLevel2Qry = "";
+		IDfCollection dfColRelationObj = null;
+		IDfCollection dfColVirtualLevel1 = null;
+		IDfCollection dfColVirtualLevel2 = null;
+		IDfCollection dfColDisposition1 = null;
+		IDfCollection dfColDisposition2 = null;
+		IDfSysObject dfComponentObj = null;
+		IDfSysObject dfVirtualObj = null;
+		
+		Calendar calTime = null;
+		Date DispositionRunDate = null;
+		
+		//SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy");
+		SimpleDateFormat sdf = new SimpleDateFormat("MM/dd/yyyy hh:mm:ss a");
+		String strSmtpServer = session.getServerConfig().getString("smtp_server");
+		strMessage = new StringBuffer();
+		
+		strMessage
+		.append("<table width=\"1235\"><tbody><tr><td style=\"width: 1235px; text-align: center; vertical-align: middle; background-color: #add8e6;\" width=\"1235\">");
+		strMessage
+		.append("<p><span style=\"color: #ff0000;\"><strong>Remove Child Documents for Destruction Report" + " (" + docbase + ")" + "</strong></span></p>");
+		if(jobMode.equalsIgnoreCase("SpecialDelete")){
+			strMessage
+			.append("</td></tr></tbody></table><p><strong>~ Job Name</strong> &nbsp;: AMRSRemoveChildDocsForSpecialDelete</p><p><strong>~ Start Time</strong> : " + strStartDate + "</p>");				
+		}else if(jobMode.equalsIgnoreCase("Disposition")){
+			strMessage
+			.append("</td></tr></tbody></table><p><strong>~ Job Name</strong> &nbsp;: AMRSRemoveChildDocsForDisposition</p><p><strong>~ Start Time</strong> : " + strStartDate + "</p>");								
+		}
+		strMessage
+		.append("<p>----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------</p>");		
+
+		try {		
+			if(jobMode.equalsIgnoreCase("SpecialDelete")){
+				strRelationObjQry = "select r_object_id, parent_id from dm_relation where child_id in (select r_object_id from dm_document where lower(object_name) = '" + AMRS_SPECIAL_DELETE + "')";
+				if(debugMode)
+					msgPrintJobLog("\t@strRelationObjQry 	: " + strRelationObjQry);
+				dfColRelationObj = AMRSUtil.execReadQuery(strRelationObjQry, session);
+				if (dfColRelationObj == null) {
+					msgPrintJobLog("\t\tFailed to execute query : " + strRelationObjQry);
+					return;
+				}else{
+					while(dfColRelationObj.next()){
+						dfComponentObj = (IDfSysObject) session.getObject(new DfId(dfColRelationObj.getString(PARENT_ID)));
+						strComponentChronicleId = dfComponentObj.getChronicleId().toString();
+						strComponentNodeName = dfComponentObj.getObjectName();
+						strVirtualDocLevel1Qry = "select r_object_id, parent_id from dmr_containment where component_id = '" + strComponentChronicleId + "'";
+						if(debugMode)
+							msgPrintJobLog("\t\t@strVirtualDocLevel1Qry 	: " + strVirtualDocLevel1Qry);
+						dfColVirtualLevel1 = AMRSUtil.execReadQuery(strVirtualDocLevel1Qry, session);
+						if (dfColVirtualLevel1 == null) {
+							msgPrintJobLog("\t\t\tFailed to execute query : " + strVirtualDocLevel1Qry);
+							return;
+						}else{
+							while(dfColVirtualLevel1.next()){
+								dfVirtualObj = (IDfSysObject) session.getObject(new DfId(dfColVirtualLevel1.getString(PARENT_ID)));
+								strVirtualChronicleId = dfVirtualObj.getChronicleId().toString();
+								
+								strVirtualDocLevel2Qry = "select r_object_id, parent_id from dmr_containment where component_id = '" + strVirtualChronicleId + "'";
+								if(debugMode)
+									msgPrintJobLog("\t\t\t@strVirtualDocLevel2Qry 	: " + strVirtualDocLevel2Qry);								
+								dfColVirtualLevel2 = AMRSUtil.execReadQuery(strVirtualDocLevel2Qry, session);
+								if (dfColVirtualLevel2 == null) {
+									msgPrintJobLog("\t\t\tFailed to execute query : " + strVirtualDocLevel2Qry);
+									return;
+								}else{
+									if(dfColVirtualLevel2.next()){
+										if(!dfColVirtualLevel2.getString(PARENT_ID).equalsIgnoreCase(dfVirtualObj.getObjectId().toString())){
+											iDocsNested++;
+											msgPrintJobLog("\t\t\t\tChild document : " + strComponentNodeName + "<" + strComponentChronicleId + "> is in a Nested Package : " + dfVirtualObj.getObjectName() + "<" + strVirtualChronicleId + ">");
+										
+											strMessage.append("<ol>");										
+											strMessage.append("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<p>Child document : " + strComponentNodeName + "(" + strComponentChronicleId + ") is in a Nested Package : " + dfVirtualObj.getObjectName() + "(" + strVirtualChronicleId + ") and cannot be deleted.</p>");
+											strMessage.append("</ol>");
+											//strMessage.append("<p>[<strong>Records Analyst</strong>]: Unable to delete Child document because its in a Nested package.</p>");
+										}else{
+											iVirtualCounter++;
+											removeNode(dfVirtualObj, dfComponentObj, dfComponentObj.getChronicleId().toString());
+										}
+									}else{
+										iVirtualCounter++;
+										removeNode(dfVirtualObj, dfComponentObj, dfComponentObj.getChronicleId().toString());
+									}
+								}								
+							}
+						}					
+					}
+				}
+			}else if(jobMode.equalsIgnoreCase("Disposition")){
+				strDispositionReadyQry1 = "select disposition_cycle from dm_dbo.AMRS_disposition_parameters where disposition_ready_to_process = '"
+						+ "Y' and date_disposition_run is NULLDATE";
+				if(debugMode)
+					msgPrintJobLog("\t@strDispositionReadyQry 	: " + strDispositionReadyQry1);	
+				dfColDisposition1 = AMRSUtil.execReadQuery(strDispositionReadyQry1, session);
+				if (dfColDisposition1 == null) {
+					msgPrintJobLog("\t\tFailed to execute query : " + strDispositionReadyQry1);
+					return;
+				}else{
+					while(dfColDisposition1.next()){
+						strDispositionCycle = dfColDisposition1.getString("disposition_cycle");	
+						strDispositionReadyQry2 = "select r_object_id, policy_name from dm_dbo.AMRS_applied_policies where disposition_cycle_approved = '"
+								+ strDispositionCycle + "'";
+						
+						if (debugMode) {
+							msgPrintJobLog("\t\t@strDispositionReadyQry2 : " + strDispositionReadyQry2);
+						}						
+						dfColDisposition2 = AMRSUtil.execReadQuery(strDispositionReadyQry2, session);
+						if (dfColDisposition2 == null) {
+							msgPrintJobLog("\t\t\tFailed to execute query : " + strDispositionReadyQry2);
+							return;
+						}else{
+							while (dfColDisposition2.next()){
+								dfComponentObj = (IDfSysObject) session.getObject(new DfId(dfColDisposition2.getString(OBJECT_ID)));
+								strComponentChronicleId = dfComponentObj.getChronicleId().toString();
+								strComponentNodeName = dfComponentObj.getObjectName();
+								strVirtualDocLevel1Qry = "select r_object_id, parent_id from dmr_containment where component_id = '" + strComponentChronicleId + "'";
+								if(debugMode)
+									msgPrintJobLog("\t\t\t@strVirtualDocLevel1Qry : " + strVirtualDocLevel1Qry);
+								dfColVirtualLevel1 = AMRSUtil.execReadQuery(strVirtualDocLevel1Qry, session);
+								if (dfColVirtualLevel1 == null) {
+									msgPrintJobLog("\t\t\t\tFailed to execute query : " + strVirtualDocLevel1Qry);
+									return;
+								}else{
+									while(dfColVirtualLevel1.next()){
+										dfVirtualObj = (IDfSysObject) session.getObject(new DfId(dfColVirtualLevel1.getString(PARENT_ID)));
+										strVirtualChronicleId = dfVirtualObj.getChronicleId().toString();										
+										strVirtualDocLevel2Qry = "select r_object_id, parent_id from dmr_containment where component_id = '" + strVirtualChronicleId + "'";
+										if(debugMode)
+											msgPrintJobLog("\t\t\t\t\tFailed to execute query : " + strVirtualDocLevel2Qry);										
+										dfColVirtualLevel2 = AMRSUtil.execReadQuery(strVirtualDocLevel2Qry, session);
+										if (dfColVirtualLevel2 == null) {
+											msgPrintJobLog("\t\tFailed to execute query : " + strVirtualDocLevel2Qry);
+											return;
+										}else{
+											if(dfColVirtualLevel2.next()){
+												if(!dfColVirtualLevel2.getString(PARENT_ID).equalsIgnoreCase(dfVirtualObj.getObjectId().toString())){
+													iDocsNested++;
+													msgPrintJobLog("\t\t\t\t\tChild document : " + strComponentNodeName + "<" + strComponentChronicleId + "> is in a nested package : " + dfVirtualObj.getObjectName() + "<" + strVirtualChronicleId + ">");
+												
+													strMessage.append("<ol>");										
+													strMessage.append("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<p>Child document : " + strComponentNodeName + "(" + strComponentChronicleId + ") is in a Nested package : " + dfVirtualObj.getObjectName() + "(" + strVirtualChronicleId + ") and cannot be deleted.</p>");
+													strMessage.append("</ol>");
+												}else{
+													iVirtualCounter++;
+													removeNode(dfVirtualObj, dfComponentObj, dfComponentObj.getChronicleId().toString());
+												}
+											}else{
+												iVirtualCounter++;
+												removeNode(dfVirtualObj, dfComponentObj, dfComponentObj.getChronicleId().toString());
+											}
+										}										
+									}
+								}								
+							}
+						}
+					}
+				}
+			}
+			
+			strMessage.append("<p>----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------</p>");
+			strMessage.append("<p></p>");
+			strMessage.append("<p>Thanks,</p>");
+			strMessage.append("<p><strong>EDM Team</strong></p>");			
+			
+			
+			//Begin : Trigger Email notifications... 
+				addEmailAddress(USER_DMADMIN, TO_LIST);
+				addEmailAddressByDctmGroup("grp_rec_admin", TO_LIST);
+				
+				if(blnTriggerMail){
+					dumsEmailNotification.sendEmail(strSmtpServer,toList, ccList, AMRS_NOTIFICATION_SUBJECT + " (" + docbase + ")",strMessage.toString(),"edmsysadm@dums.org","text/html; charset=utf-8");
+				}
+			//End : Trigger Email notifications...
+			msgPrintJobLog("");
+			msgPrintJobLog("#####################################################");
+			msgPrintJobLog("#	Total Nodes removed : " + iVirtualCounter);
+			msgPrintJobLog("#	Total Nodes Nested  : " + iDocsNested);
+		} catch (DfException e) {
+			msgPrintJobLog(e.getMessage());
+		} catch (MessagingException e) {
+			msgPrintJobLog(e.getMessage());
+		} finally {
+			if (dfColRelationObj != null)
+				dfColRelationObj.close();
+			else if (dfColDisposition1 != null)
+				dfColDisposition1.close();
+			else if (dfColDisposition2 != null)
+				dfColDisposition2.close();
+			else if (dfColVirtualLevel1 != null)
+				dfColVirtualLevel1.close();
+			else if (dfColVirtualLevel2 != null)
+				dfColVirtualLevel2.close();			
+		}
+	}
+	
+	private void removeNode(IDfSysObject dfVirtualObj, IDfSysObject dfComponentObj,String strNodeChronicleid) throws DfException{
+        IDfVirtualDocumentNode nodeRoot=null;
+        IDfVirtualDocument vDoc=null;
+        if(dfVirtualObj.isVirtualDocument()) {
+            vDoc = dfVirtualObj.asVirtualDocument("CURRENT", false );
+            nodeRoot = vDoc.getRootNode();
+        } else {
+        	msgPrintJobLog("\t\t\t\t" + dfVirtualObj.getObjectName() + "(" + dfVirtualObj.getObjectId().toString() + ") is not a virtual document.");
+        }
+        if(nodeRoot.getChildCount() < 1 ){
+        	msgPrintJobLog("\t\t\t\t" + dfVirtualObj.getObjectName() + "(" + dfVirtualObj.getObjectId().toString() + ") has no children.");
+        }
+        dfVirtualObj.checkout();
+        dfVirtualObj.setBoolean("r_immutable_flag",true);
+        IDfVirtualDocumentNode nodeChild =  vDoc.find(nodeRoot,strNodeChronicleid,"r_object_id",0);
+        if(nodeChild == null){
+        	nodeChild = vDoc.find(nodeRoot,dfComponentObj.getObjectId().toString(),"r_object_id",0);
+        	msgPrintJobLog("\t\t\t\t~" + dfVirtualObj.getObjectName() + "(" + dfComponentObj.getObjectId().toString() + ")  was removed from the Virtual Document " + dfVirtualObj.getObjectName() + "(" + dfVirtualObj.getObjectId().toString() + ")");
+			strMessage.append("<ol>");										
+			strMessage.append("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<p>\t\t\t\t# " + dfVirtualObj.getObjectName() + "(" + dfComponentObj.getObjectId().toString() + ")  was <strong>removed</strong> from the Virtual Document : {" + dfVirtualObj.getObjectName() + "(" + dfVirtualObj.getObjectId().toString() + ")} <strong>successfully</strong></p>");
+			strMessage.append("</ol>");
+			if(nodeChild != null)				//If node child found in virtual tree hierarchy using r_object_id or i_chronicle_id
+				vDoc.removeNode(nodeChild);
+        }else{
+        	msgPrintJobLog("\t\t\t\t~" + dfVirtualObj.getObjectName() + "(" + strNodeChronicleid + ")  was removed from the Virtual Document " + dfVirtualObj.getObjectName() + "(" + dfVirtualObj.getObjectId().toString() + ")");
+			strMessage.append("<ol>");										
+			strMessage.append("&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;<p>\t\t\t\t# {" + dfVirtualObj.getObjectName() + "(" + strNodeChronicleid + ")}  was <strong>removed</strong> from the Virtual Document : {" + dfVirtualObj.getObjectName() + "(" + dfVirtualObj.getObjectId().toString() + ")} <strong>successfully</strong></p>");
+			strMessage.append("</ol>");
+			vDoc.removeNode(nodeChild);
+        }
+        dfVirtualObj.setBoolean("r_immutable_flag",false);
+        dfVirtualObj.save();
+        //vDoc.resync(session, nodeChild.getSelectedObject().getObjectId(), 0 );
+    }
+	
+	private void addEmailAddressByDctmGroup(String strGrpName, int emailList) throws DfException{
+		IDfGroup dfGroup = null;
+		IDfCollection dfRecUserGroupCol = null;
+		try {
+			dfGroup = (IDfGroup)session.getObjectByQualification("dm_group where group_name = '" + strGrpName + "'");
+			dfRecUserGroupCol = dfGroup.getUsersNames();
+			while(dfRecUserGroupCol.next()){
+				addEmailAddress(dfRecUserGroupCol.getString("users_names"), TO_LIST);
+			}
+		} catch (DfException e) {
+			msgPrintJobLog(e.getMessage());
+		}finally{
+			try{
+				if(dfRecUserGroupCol != null){
+					dfRecUserGroupCol.close();
+				}
+			} catch (DfException e) {
+				msgPrintJobLog(e.getMessage());
+			}
+		}
+	}
+	
+	private String addEmailAddress(String userFullName,int emailList) throws DfException {
+		/* Also include supervisor on the email list - if notifSpvsrAfterNoDaysLate > 0
+		 * and iDays > notifSpvsrAfterNoDaysLate
+		 */
+		//String userEmailAddress = "";
+		String userEmailQuery = "select user_address, user_os_name from dm_user where user_name = '" + userFullName + "'";
+		String ret = "";
+		try {
+			ret = addEmailAddress(emailList,userEmailQuery);
+		}
+		catch (DfException de) {
+			throw de;
+		}
+		return ret;
+		//String userEmailQuery = "select user_address, user_os_name from dm_user where user_name = '" + userName + "'";
+	}
+	/**
+	 * addEmailAddress - (bug 2092) lookup the user's email address by looking up the dm_user by user_name
+	 * @param emailList - indicates if cc or to list
+	 * @param userEmailQuery - query to lookup user address
+	 * @return userOSName - the user os name - in the case that a lookup requires an os name - 
+	 * reduces lookup redundancy. 
+	 * @throws DfException
+	 */
+	private String addEmailAddress(int emailList,String userEmailQuery) throws DfException {
+		
+		String userEmailAddress = "";
+		String userOSName = "";
+		try {
+			IDfCollection userEmailLookup = AMRSUtil.execReadQuery(userEmailQuery, session);
+			if (userEmailLookup.next()) {
+				userEmailAddress = userEmailLookup.getString("user_address");
+				userOSName = userEmailLookup.getString("user_os_name");
+				userEmailLookup.close();
+				if (!userEmailAddress.isEmpty()) {
+					userEmailAddress = userEmailAddress.trim();
+					//first assure that email address is not already included in the cc or to list 
+					if (emailList == CC_LIST && !this.ccList.contains(userEmailAddress)) {
+						this.ccList.add(userEmailAddress);
+					}
+					else if (emailList == TO_LIST && !this.toList.contains(userEmailAddress)) { 
+						this.toList.add(userEmailAddress);
+					}
+					
+				}
+			}
+		}
+		catch (DfException de) {
+			//ignore for now;
+		}
+		return userOSName;
+	}	
+	
+	private static final int CC_LIST = 2;
+	private static final int TO_LIST = 1;	
+	private static final String BLANK_STRING = "";
+	private static final String EOL_WIN32 = "\r\n";
+	private static final String DOMAIN = "domain";
+	private static final String PASSWORD = "password";
+	private static final String DOCBASE_NAME = "docbase_name";
+	private static final String USER_NAME = "user_name";
+	private static final String DEBUG_MODE = "debug_mode";
+	private static final String JOB_MODE = "job_mode";
+	private static final String OBJECT_ID = "r_object_id";
+	private static final String PARENT_ID = "parent_id";
+	private static final String USER_DMADMIN = "dmadmin";
+	private static final String AMRS_SPECIAL_DELETE = "AMRS special delete";
+	private static final String AMRS_NOTIFICATION_SUBJECT = "Remove Child Documents for Destruction Report";
+
+	private ArrayList<String> ccList = null;
+	private ArrayList<String> toList = null;
+ 	
+	private boolean debugMode = false;
+	private boolean loginEncrypt = false;
+	private String docbase = null;
+	private String userName = null;
+	private String password = null;
+	private String domain = null;
+	private String jobMode = null;
+	private String strStartDate = "";
+	private StringBuffer strMessage = null;
+
+	private OutputStream jobReport = null;
+	private IDfSession session = null;
+
+}
